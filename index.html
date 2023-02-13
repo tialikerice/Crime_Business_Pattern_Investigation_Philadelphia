@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<head>
+  <link rel="stylesheet" type="text/css" href="./styles.css" />
+  <title>INFO 5100 Project 3</title>
+</head>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://d3js.org/topojson.v3.min.js"></script>
+<script src="https://unpkg.com/topojson@3"></script>
+
+<body>
+  <h1>Crime and Business Pattern Investigation in Philadelphia</h1>
+  <div style="display:flex">
+  <div id="main-graph" style="float:left">
+    <div id="choropleth-button-bar">
+      <div>
+        Display the locations of
+        <input id="checkboxCrime" type="radio" name="display" value="crimes"> crimes
+        <input id="checkboxBusiness" type="radio" name="display" value="businesses"> businesses
+        <input id="checkboxCrimeBusiness" type="radio" name="display" value="crimes and businesses" checked> crimes and businesses <br>
+        <label>Display zip codes</label>
+        <input type="checkbox" id="switch" class="checkbox" />
+        <label for="switch" class="toggle"></label><br><br>
+    </div>
+    </div>
+    <div id="choropleth-graph">
+      <svg id="choropleth" height="700" width="630" style="margin:0px; border:0px solid black;"></svg>
+    </div>
+    <div id="choropleth-legend">
+      <div id = "dot-legend" style="text-align: center;">
+      <span class = "dot" style = "
+      height: 10px;
+      width: 10px;
+      background-color: #780A2B;
+      opacity: 0.8;
+      border-radius: 50%;
+      display: inline-block;
+      text-align: left;
+    "> </span>&nbsp<span>Crime</span>
+    &nbsp&nbsp&nbsp&nbsp
+    <span class = "dot" style = "
+    height: 10px;
+    width: 10px;
+    background-color: blue;
+    opacity: 0.6;
+    border-radius: 50%;
+    display: inline-block;
+    text-align: left;
+  "> </span>&nbsp<span>Business</span>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp
+
+</div>
+      <div id="legend" height="700" width="600" style="margin:0px;">
+      </div>
+    </div>
+  </div>
+
+  <div id="complementary-graph" style="float:right; margin-left: 15px;">
+    <div id="bubblechart">
+      <p id="bubbleTitle"> Businesses, Crimes, and Population Density</p>
+      <svg id="bubble" height="450" width="600" ></svg>
+    </div>
+    <div id="bar-button-bar">
+      <!-- remember to modify and unify class name here -->
+      <p id="barTitle"> Top 10 Businesses in Selected Zip Code</p>
+      Filter by:
+      <input id="checkboxReview" type="radio" name="display2" value="business reviews" checked> Yelp reviews
+      <input id="checkboxCategory" type="radio" name="display2" value="business categories"> business categories
+    </div>
+    <div id="barchart-graph"></div>
+  </div>
+  </div>
+
+  <script>
+    var projection = d3.geoMercator()
+                      .center([-75.12, 40.05])
+                      .scale(100000);
+
+    const svg = d3.select("#choropleth")
+    const width = svg.attr("width");
+    const height = svg.attr("height");
+
+    var path = d3.geoPath()
+        .projection(projection);
+
+    var g = svg.append("g");
+
+    // Move the map to the center of the frame
+    g.attr("transform", "translate(-190,10)");
+
+    // Set the dimensions and margins of the bubble chart
+    const margin = {top: 40, right: 20, bottom: 60, left: 50},
+          width2 = 630 - margin.left - margin.right,
+          height2 = 420 - margin.top - margin.bottom;
+
+    // Append the svg object to the body of the page
+    const svgBubble = d3.select("svg#bubble")
+                   .attr("width", width2 + margin.left + margin.right)
+                   .attr("height", height2 + margin.top + margin.bottom)
+                   .append("g")
+                   .attr("transform", `translate(${margin.left},${margin.top})`);
+
+    // Complementary barchart
+    const barMargin = {top: 30, right: 30, bottom: 150, left: 35},
+       barWidth = 630 - barMargin.left - barMargin.right,
+       barHeight = 480 - barMargin.top - barMargin.bottom;
+
+    const svgBar = d3.select("#barchart-graph")
+     .append("svg")
+       .attr("width", barWidth + barMargin.left + barMargin.right)
+       .attr("height", barHeight + barMargin.top + barMargin.bottom)
+     .append("g")
+       .attr("transform", `translate(${barMargin.left+5},${barMargin.top})`);
+
+    var barTitleText = d3.selectAll("p#barTitle");
+    var bubbleTitleText = d3.selectAll("p#bubbleTitle");
+
+    // Initialize the X axis
+    const xScaleBar = d3.scaleBand()
+                        .range([ 0, barWidth])
+                        .padding(0.2);
+    let barBottomAxis = d3.axisBottom();
+    let barBottomAxisG = svgBar.append("g")
+                              .attr("transform", `translate(0,${barHeight+10})`)
+                              .attr("id", "axis")
+
+    // Initialize the Y axis
+    const yScaleBar = d3.scaleLinear()
+                        .range([ barHeight, 0]);
+    let yAxisBar = d3.axisLeft().tickFormat(d3.format(""));
+    let yAxisBarG = svgBar.append("g")
+                          .attr("id", "axis")
+
+    const requestData = async function() {
+
+      const topology = await d3.json("Zipcodes_Philadelphia.json");
+      const businesses = await d3.json("yelp_business_philadelphia_final.json");
+      const population = await d3.csv("pop_philadelphia.csv");
+      const crime = await d3.csv("crime.csv");
+
+      // Find all zip codes from the topology file (convert each zip code to a number and sort them)
+      var allZip = topojson.feature(topology, topology.objects.Zipcodes_Poly).features.map(function(d) { return +d.properties.CODE; }).sort(function(a, b) { return a - b; });
+
+      // Categorize crime count by zip code, disregard empty values
+      var crimeByZip = {};
+      crime.forEach(function(d) {
+        if (d.zip != "") {
+          if (d.zip in crimeByZip) {
+            crimeByZip[d.zip] += 1;
+          } else {
+            crimeByZip[d.zip] = 1;
+          }
+        }
+      });
+
+      // Compare crimeByZip with allZip, if the zip code doesn't exist in allZip, add to the array and set the value to 0
+      allZip.forEach(function(d) {
+        if (!(d in crimeByZip)) {
+          crimeByZip[d] = 0;
+        }
+      });
+
+      // Categorize business count by zip code, only keep zip codes in crimeByZip
+      var businessByZip = {};
+      businesses.forEach(function(d) {
+        if (d.postal_code in crimeByZip) {
+          if (d.postal_code in businessByZip) {
+            businessByZip[d.postal_code] += 1;
+          } else {
+            businessByZip[d.postal_code] = 1;
+          }
+        }
+      });
+
+      // Filter out businesses with zip codes not in allZip
+      var businessFiltered = {}
+      businesses.forEach( (d) => {
+        d['postal_code'] = Number(d['postal_code'])
+      });
+      businessFiltered = businesses.filter( (d, i) => {return allZip.includes(d['postal_code'])})
+
+      // manually remove some business that are obviously not in the map
+      businessFiltered2 = businessFiltered.filter( (d) => {return d['name'] != "You Call We Haul" && d['name'] != "Casselli's Ristorante" &&
+                                                                  d['name'] != "AnBrea's Beauty Salon" && d['name'] != "Tritone" &&
+                                                                  d['name'] != "Friendly's" && d['name'] != "Dairy Queen" &&
+                                                                  d['name'] != "Kremp Florist" && d['name'] != "Maytag" &&
+                                                                  d['name'] != "Founding Fathers Outfitters" && d['name'] != "NY Bagel Cafe & Deli" &&
+                                                                  d['name'] != "Mike Kilian Small Engine Repair" && d['name'] != "Andy's Diner" &&
+                                                                  d['name'] != "Philly Spy" && d['name'] != "Ernesto Custom Menswear" &&
+                                                                  d['name'] != "RiverLink Ferry System" && d['name'] != "Virgin America" &&
+                                                                  d['name'] != "New Frontier Outfitters" && d['name'] != "New Frontier Outfitters" &&
+                                                                  d['name'] != "Chickie’s and Pete’s" && d['name'] != "Flying Angels" &&
+                                                                  d['name'] != "Algorithm Restaurants" && d['name'] != "Keep It Moving" &&
+                                                                  d['longitude'] > -75.2982907297
+                                                                });
+
+      // Find the population for each zip code
+      var populationByZip = {}
+      population.forEach(function(d) {
+        d['PeopleSqMile'] = Number(d['PeopleSqMile']);
+        populationByZip[d.zip] = d['PeopleSqMile']
+      })
+
+      data = []
+      zip_list = []
+      for (var key in crimeByZip){
+        //key will be -> 'id'
+        //dictionary[key] -> 'value'
+        zip_list.push(key)
+        data.push({"Name": key, "crimeCount": crimeByZip[key], "busCount": businessByZip[key], "popCount": populationByZip[key]})
+      }
+      list_pop = []
+      for (var key in populationByZip){
+        //key will be -> 'id'
+        //dictionary[key] -> 'value'
+        list_pop.push(populationByZip[key])
+      }
+      const colorScaleMap = d3.scaleLinear()
+                        .domain(list_pop)
+                        .range(["#cb4e64", "#c01e39"]);
+      const legend = d3.select("#legend");
+      const mapLegend = legend.append("svg")
+                              .attr('x', 300)
+                              .attr('y', 750)
+                              .attr("height", 100)
+                              .attr("width", 600)
+                              .style('background', '#fff')
+                              .style('margin-top', '20px')
+                              .style('margin-bottom', '10px')
+                              .attr('id', 'colorLegend');
+
+      function drawLegend(legendSelector, legendColorScale) {
+
+        // This code should adapt to a variety of different kinds of color scales
+        //  Credit Prof. Rz if you are basing a legend on this structure, and note PERFORMANCE CONSIDERATIONS
+
+        // Shrink legend bar by 5 px inwards from sides of SVG
+        const offsets = { width: 10,
+                          top: 30,
+                          bottom: 50 };
+        // Number of integer 'pixel steps' to draw when showing continuous scales
+        //    Warning, not using a canvas element so lots of rect tags will be created for low stepSize, causing issues with performance -- keep this large
+        const stepSize = 4;
+        // Extend the minmax by 0% in either direction to expose more features by default
+        const minMaxExtendPercent = 0;
+
+        const legend = d3.select(legendSelector);
+        const legendHeight = legend.attr("height");
+        const legendBarWidth = legend.attr("width") - (offsets.width * 3);
+        const legendMinMax = d3.extent(legendColorScale.domain());
+                    // recover the min and max values from most kinds of numeric scales
+        const minMaxExtension = (legendMinMax[1] - legendMinMax[0]) * minMaxExtendPercent;
+        const barHeight = legendHeight - offsets.top - offsets.bottom;
+
+        // In this case the "data" are pixels, and we get numbers to use in colorScale
+        // Use this to make axis labels
+        let barScale = d3.scaleLinear().domain([legendMinMax[0]-minMaxExtension,
+                                                  legendMinMax[1]+minMaxExtension])
+                                      .range([0,legendBarWidth]);
+        let barAxis = d3.axisBottom(barScale).ticks(5);
+
+        // Legend label
+        legend.append("text")
+              .attr("x", legendBarWidth/2+20)
+              .attr("y", offsets.top/2)
+              .attr("text-anchor", "middle")
+              .attr("id", "legend")
+              .text("Population Density");
+
+        // Place for bar slices to live
+        let bar = legend.append("g")
+                        .attr("class", "legend colorbar")
+                        .attr('opacity', 0.5)
+                        .attr("transform", `translate(${offsets.width},${offsets.top})`)
+
+        // ****** SWITCHES FOR DIFFERENT SCALE TYPES ******
+
+        // Check if we're using a binning scale - if so, we make blocks of color
+        if (legendColorScale.hasOwnProperty('thresholds') || legendColorScale.hasOwnProperty('quantiles')) {
+          // Get the thresholds
+          let thresholds = [];
+          if (legendColorScale.hasOwnProperty('thresholds')) { thresholds = legendColorScale.thresholds() }
+          else { thresholds = legendColorScale.quantiles() }
+
+          const barThresholds = [legendMinMax[0], ...thresholds, legendMinMax[1]];
+
+          // Use the quantile breakpoints plus the min and max of the scale as tick values
+          barAxis.tickValues(barThresholds);
+
+          // Draw rectangles between the threshold segments
+          for (let i=0; i<barThresholds.length-1; i++) {
+            let dataStart = barThresholds[i];
+            let dataEnd = barThresholds[i+1];
+            let pixelStart = barAxis.scale()(dataStart);
+            let pixelEnd = barAxis.scale()(dataEnd);
+
+            bar.append("rect")
+              .attr("x", pixelStart)
+              .attr("y", 0)
+              .attr("width", pixelEnd - pixelStart )
+              .attr("height", barHeight)
+              .style("fill", legendColorScale( (dataStart + dataEnd) / 2.0 ) );
+          }
+        }
+        // Else if we have a continuous / roundable scale
+        else if (legendColorScale.hasOwnProperty('rangeRound')) {
+          // NOTE: The barAxis may round min and max values to make them pretty
+          // ** This also means there is a risk of the legend going beyond scale bounds
+          // We need to use the barAxis min and max just to be sure the bar is complete
+          //    Using barAxis.scale().invert() goes from *axis* pixels to data values easily
+          // ** We also need to create patches for the scale if the labels exceed bounds
+          //     (floating point comparisons risky for small data ranges,but not a big deal
+          //      because patches will be indistinguishable from actual scale bottom)
+          // It's likely that scale clamping will actually do this for us elegantly
+          // ...but better to be safer and patch the regions anyways
+
+          for (let i=0; i<legendBarWidth; i=i+stepSize) {
+
+            let center = i+(stepSize/2);
+            let dataCenter = barAxis.scale().invert( center );
+
+            // below normal scale bounds
+            if ( dataCenter < legendMinMax[0] ) {
+              bar.append("rect")
+                .attr("x", i)
+                .attr("y", 0)
+                .attr("width", stepSize)
+                .attr("height",barHeight)
+                .style("fill", legendColorScale( legendMinMax[0] ) );
+            }
+            // within normal scale bounds
+            else if ( dataCenter < legendMinMax[1] ) {
+              bar.append("rect")
+                  .attr("x", i)
+                  .attr("y", 0)
+                  .attr("width", stepSize)
+                  .attr("height",barHeight)
+                  .style("fill", legendColorScale( dataCenter ) );
+            }
+            // above normal scale bounds
+            else {
+              bar.append("rect")
+                  .attr("x", i)
+                  .attr("y", 0)
+                  .attr("width", stepSize)
+                  .attr("height",barHeight)
+                  .style("fill", legendColorScale( legendMinMax[1] ) );
+            }
+
+          }
+        }
+        // Otherwise we have a nominal scale
+        else {
+          let nomVals = legendColorScale.domain().sort();
+
+          // Use a scaleBand to make blocks of color and simple labels
+          let barScale = d3.scaleBand().domain(nomVals)
+                                      .range([0,legendBarWidth])
+                                      .padding(0.05);
+          barAxis.scale(barScale);
+
+          // Draw rectangles for each nominal entry
+          nomVals.forEach( d => {
+            bar.append("rect")
+              .attr("x", barScale(d) )
+              .attr("y", 0)
+              .attr("width", barScale.bandwidth() )
+              .attr("height", barHeight)
+              .style("fill", legendColorScale( d ) );
+          });
+        }
+        // DONE w/SWITCH
+
+        // Finally, draw legend labels
+        legend.append("g")
+              .attr("class", "legend axis")
+              .attr("transform",`translate(${offsets.width},${offsets.top+barHeight+5})`)
+              .call(barAxis);
+      }
+      drawLegend('#colorLegend', colorScaleMap)
+
+      const businessExtent = d3.extent(data, d => d.busCount);
+      const crimeExtent = d3.extent(data, d => d.crimeCount);
+      const popExtent = d3.extent(data, d => d.popCount);
+
+      // Get the top 10 business by zip, not implemented anywhere in the graph yet
+      let sortableBusiness = [];
+      for (let zip in businessByZip) {
+          sortableBusiness.push({"postal_code" : zip, "count" : businessByZip[zip]});
+      }
+      let sortedBusiness = sortableBusiness.sort((a, b) => d3.descending(a.count, b.count)).slice(0, 10)
+
+      // Create a bar chart
+      function displayTop(zipcode) {
+        // get all business in that area
+        businessInArea = [];
+        businessFiltered2.forEach( d => {
+          if (d.postal_code == zipcode) {
+            businessInArea.push(d);
+          }
+        });
+        // sort by review count
+        let sortedReviewCount = businessInArea.sort((a, b) => d3.descending(a.review_count, b.review_count)).slice(0, 10)
+
+        // find and then sort the top 10 categories
+        let categories_string = ""
+        for (let i = 0; i < businessInArea.length; i++) {
+            categories_string = businessInArea[i].categories + ", " + categories_string
+        }
+        let categories_list = categories_string.split(',');
+        let countCategory = {};
+        for (const element of categories_list) {
+            if (countCategory[element]) {
+                countCategory[element] += 1;
+            } else {
+                countCategory[element] = 1;
+            }
+        }
+        let items = Object.keys(countCategory).map(function (key) {
+            return [key, countCategory[key]];
+        });
+        items.sort(function (first, second) {
+            return second[1] - first[1];
+        });
+        // Select top 10 categories.
+        let top10Categories = [];
+        for (let i = 0; i < 10; i++) {
+            let category = {
+                name: items[i][0],
+                categoryCount: items[i][1]
+            }
+            top10Categories.push(category);
+        }
+
+        let currButtonBar = "review_count";
+        updateBar(sortedReviewCount, currButtonBar, zipcode);
+
+        let rects = svgBar.selectAll("rect")
+
+        rects.on("mouseover", function() {
+          d3.selectAll('.times')
+              .attr('opacity', 0)
+          d3.select(this)
+              .transition().duration(00)
+              .attr("width", xScaleBar.bandwidth()+3)
+              .style('opacity', 0.6)
+
+          let xBar = d3.select(this).datum()["name"]
+          let yBar = d3.select(this).datum()[currButtonBar]
+          let line = svgBar.append('line')
+              .attr('id', 'limit')
+              .attr('x1', 0)
+              .attr('y1', yScaleBar(yBar))
+              .attr('x2', width)
+              .attr('y2', yScaleBar(yBar))
+              .style('stroke', 'darkgrey')
+              .style('stroke-width', "1.5")
+              .style('stroke-dasharray', ("5", "3"))
+          let barText = svgBar.append('text')
+              .attr('id', 'bartext')
+              .attr('x', xScaleBar(xBar)+24)
+              .attr('y', yScaleBar(yBar)-7)
+              .attr('text-anchor', 'middle')
+              .text(yBar)
+              .style('fill', 'grey')
+              .style("font-size", "1em")
+              .attr('opacity', 0.8)
+        });
+
+        rects.on("mouseout", function() {
+          d3.selectAll('.times')
+              .attr('opacity', 1)
+          d3.select(this)
+              .transition()
+              .duration(300)
+               .style('opacity', 1)
+               .attr("width", xScaleBar.bandwidth())
+          svgBar.selectAll('#limit').remove()
+          svgBar.selectAll('#bartext').remove()
+          });
+
+        d3.select("#checkboxReview")
+          .on("click", function() {
+            // When it's clicked, call updateBars to update the chart
+            currButtonBar = "review_count";
+            updateBar(sortedReviewCount, currButtonBar, zipcode)}
+          );
+        d3.select("#checkboxCategory")
+          .on("click", function() {
+            // When it's clicked, call updateBars to update the chart
+            currButtonBar = "categoryCount";
+            updateBar(top10Categories, currButtonBar, zipcode)}
+          );
+
+      }
+
+      //clicking background
+      function resetPlots(){
+        svgBubble.selectAll("circle")
+            .attr("class", "bubbles");
+      }
+
+      // A function that create / update the plot for a given variable:
+      function updateBar(currData, currButtonBar, selectedZip) {
+        // Dynamically change the bar graph barTitle
+        if (currButtonBar == "categoryCount") {
+          barTitleText.text("Top 10 Business Categories in " + selectedZip);
+        } else {
+          barTitleText.text("Top 10 Businesses in " + selectedZip);
+        }
+        // Update the X axis
+        const dataDomain = d3.map(currData, d => d.name)
+        xScaleBar.domain(dataDomain)
+        barBottomAxis.scale(xScaleBar);
+        barBottomAxisG.call(barBottomAxis)
+                   .selectAll("text")
+                        .style("text-anchor", "end")
+                        .style("font-size", "1.1em")
+                        .attr("dx", "-.8em")
+                        .attr("dy", ".15em")
+                        .attr("transform", "rotate(-45)");
+        //Update the Y axis
+        yScaleBar.domain([0, d3.max(currData, d => d[currButtonBar])]);
+        yAxisBar.scale(yScaleBar);
+        yAxisBarG.call(yAxisBar)
+              .selectAll("text").style("font-size", "1.1em");
+        // Create the u variable
+        let u = svgBar.selectAll("rect")
+          .data(currData)
+          .enter() // Add a new rect for each new elements
+          .append("rect")
+          .attr("x", d => xScaleBar(d.name))
+          .attr("width", xScaleBar.bandwidth())
+          .attr("y", barHeight)
+          .attr("height", 0)
+          .attr("fill", "lightblue")
+        u = svgBar.selectAll("rect")
+          .data(currData)
+          .attr("x", d => xScaleBar(d.name))
+          .attr("width", xScaleBar.bandwidth())
+          // .attr("fill", d => barColor(d.postal_code))
+          .attr("fill", "lightblue")
+          .transition("bargrow")
+          .duration(950)
+            .attr("y", d => yScaleBar(d[currButtonBar]))
+            .attr("height", d => barHeight - yScaleBar(d[currButtonBar]))
+      }
+
+      // Create a bubble chart (scatterplot)
+      // Add X axis
+      const x = d3.scaleLinear()
+        .domain(crimeExtent)
+        .range([20, width2 ]);
+      const y = d3.scaleLinear()
+        .domain(businessExtent)
+        .range([ height2-10, 10]);
+      let bottomAxis = d3.axisBottom(x)
+      let bottomGridlines = d3.axisBottom(x)
+        .tickSize(-height2-10)
+        .tickFormat("");
+
+      svgBubble.append("g")
+        .attr("transform", `translate(0, ${height2})`)
+        .attr("id", "axis")
+        .call(bottomAxis);
+
+      // Add Y axis
+      let LeftAxis = d3.axisLeft(y);
+      let LeftGridlines = d3.axisLeft(y)
+        .tickSize(-width2-10)
+        .tickFormat("");
+
+      svgBubble.append("g")
+        .attr("id", "axis")
+        .call(LeftAxis);
+
+      // Add X axis label
+      svgBubble.append("text")
+          .attr("x", width2 / 2 )
+          .attr("y", height2 - margin.bottom+100)
+          .style("text-anchor", "middle")
+          .text("Number of Crimes");
+
+      // Add Y axis label
+      svgBubble.append("text")
+          .attr("text-anchor", "end")
+          .attr("transform", "rotate(-90)")
+          .attr("y", margin.left -90)
+          .attr("x", margin.top -150)
+          .text("Number of Businesses")
+
+      // Add a scale for bubble size
+      const z = d3.scaleLinear()
+        .domain(popExtent)
+        .range([2, 20]);
+
+      // Add a scale for bubble color
+      const myColor = d3.scaleOrdinal()
+        .domain(zip_list)
+        .range(d3.schemeSet2);
+
+      // -1- Create a tooltip div that is hidden by default:
+      const tooltipBubble = d3.select("#bubblechart")
+          .append("text")
+          .attr("class", "tooltip")
+          .style("opacity", 0)
+          .style("background-color", "white")
+          .style("border-radius", "5px")
+          .style("font-size", "20px")
+          .style("color", "black")
+          .style('left', width2*.62)
+          .style('top', height2-325)
+          .attr('font-size', '.8em')
+
+      // -2- Create 3 functions to show / update (when mouse move but stay on same circle) / hide the tooltip
+      const showTooltipCircle = function(event, d) {
+        tooltipBubble.transition().duration(200).style("opacity", 1)
+          .text("Zip: " + d.Name  +" Crime: " + d.crimeCount + " Business: " + d.busCount)
+          .style("left", (event.x) - 100 + "px")
+          .style("top", (event.y) + 20+ "px")
+      }
+      const moveTooltipCircle = function(event, d) {
+        tooltipBubble
+          .style("left", (event.x) - 100+ "px")
+          .style("top", (event.y) + 20 + "px")
+      }
+      const hideTooltipCircle = function(event, d) {
+        tooltipBubble.transition()
+          .duration(200)
+          .style("opacity", 0)
+      }
+
+      // Add dots
+      svgBubble.append('g')
+          .selectAll("circle")
+          .data(data)
+          .join("circle")
+          .attr("class", "bubbles")
+          .attr("cx", d => x(d.crimeCount))
+          .attr("cy", d => y(d.busCount))
+          .attr("r", d => z(d.popCount))
+          .attr("id", d => ("zip_"+d.Name))
+          .style("fill", "lightgray")
+          // .style("fill", d => myColor(d.Name))
+          .on("mouseover", showTooltipCircle )
+          .on("mousemove", moveTooltipCircle )
+          .on("mouseout", hideTooltipCircle )
+
+      // highlight the corresponding zip on the bubble chart when an area is clicked
+      function highlightBubble(zipcode) {
+        bubbleTitleText.text("Businesses, Crimes, and Population Density in " + zipcode);
+        let circleID = "#zip_" + zipcode;
+        svgBubble.selectAll("circle")
+            .attr("class", "bubbles_lowopacity")
+        svgBubble.selectAll(circleID).raise()
+            .attr("class", "bubbles_highlighted")
+      }
+
+      // zoom function
+      var zoom = d3.zoom()
+      .scaleExtent([1, 8])
+      .on('zoom', function(event) {
+          g.selectAll('path')
+            .attr('transform', event.transform);
+          g.selectAll('circle')
+            .attr('transform', event.transform)
+          g.selectAll('text')
+            .attr('transform', event.transform);
+          g.selectAll('circle')
+            .attr("r", 1 / event.transform.k);
+          g.selectAll('text')
+            .style("font-size", function(d) {
+              if ( event.transform.k > 3) {
+                return 30 / event.transform.k + "px";
+              }else if ( event.transform.k >= 1.2 && event.transform.k < 3) {
+                return 20 / event.transform.k + "px";
+              } 
+              else {
+                return 10 / event.transform.k + "px";
+              }
+            });
+      });
+      svg.call(zoom);
+
+      // Draw the map
+      g.selectAll("path")
+        .data(topojson.feature(topology, topology.objects.Zipcodes_Poly).features)
+        .enter().append("path")
+        .attr("d", path)
+        .style("fill", "white")
+        .attr("class", "zipcodes")
+        .attr("id", function(d){return d.properties.CODE;})
+        .attr("d", path)
+
+      var gBusiness = g.append('g')
+      var gCrime = g.append('g')
+      var gCrimeCon = g.append('g')
+      var gCrimetop = g.append('g')
+
+      // ** Draw a business dot chart **
+      businessFiltered2.forEach( d => {
+        d.Position = projection( [d.longitude, d.latitude] );
+      });
+
+      // Draw circles using the positions we just found
+      gBusiness.selectAll("circle").data(businessFiltered2)
+        .join("circle")
+        .attr("r", 1)
+        .attr("fill", "blue")
+        .attr("opacity", 0.4)
+        .attr("cx", d => d.Position[0])
+        .attr("cy", d => d.Position[1]);
+        // .on("mouseover", function() {
+        //   let text = d3.select(this).datum()['longitude']
+        // d3.select("#label").text(text);
+      //});
+
+      // ** Draw a crime dot chart **
+      crime.forEach( d => {
+        d.Position = projection( [d.lng, d.lat] );
+      });
+
+      gCrime.selectAll("circle").data(crime)
+        .join("circle")
+        .attr("r", 1)
+        .attr("fill", "#780A2B")
+        .attr("opacity", 0.8)
+        .attr("cx", d => d.Position[0])
+        .attr("cy", d => d.Position[1]);
+
+      // ** Draw a crime contour map **
+      // make a contour generator
+      let contourGen = d3.contourDensity()
+                      .x( d => d.Position[0] )        // point x position (best in pixels)
+                      .y( d => d.Position[1] )        // point y position (best in pixels)
+                      .size( [width, height] )        // size of canvas
+                      .thresholds( 10 );              // number of "levels" you want
+
+      // now run the contour generator on the dataset
+      let contours = contourGen(crime);
+
+      // make a color scale for the density contours
+      let valueExtent = d3.extent(contours, d => d.value);
+      let colorScale = d3.scaleSequential(d3.interpolateViridis).domain(valueExtent)
+
+      // draw the crime contour map
+      gCrimeCon.selectAll("path.contours")
+         .data(contours)
+         .join("path")
+         .attr("class", 'contours')
+         .attr("id","contour")
+         .attr("fill", d => colorScale(d.value) )
+         .attr("d", d3.geoPath())
+         .attr("opacity", 0.8)
+
+      let lastClickedZip = 19104;
+      // top map
+      gCrimetop.selectAll("path")
+               .data(topojson.feature(topology, topology.objects.Zipcodes_Poly).features)
+               .enter().append("path")
+               .attr("d", path)
+               .style("fill", d => colorScaleMap(populationByZip[d.properties.CODE]))
+               .attr("class", "zipcodes")
+               .attr("opacity", 0.5)
+               .attr("id", function(d){return "zip_" + d.properties.CODE;})
+               .attr("d", path)
+               .on("mouseover", mouseEnterZip)
+               .on("mouseout", mouseLeaveZip)
+               .on("click", function(e, d){
+                 // first removed last clicked color
+                 removeZipBlockColor(lastClickedZip);
+                 // set new clicked color
+                 d3.select(this).style("fill", "#D3D0FC")
+                     .attr("opacity", 0.8);
+                 this.clicked = true;
+                 lastClickedZip = d.properties.CODE;
+                 displayTop(d.properties.CODE); // barchart function
+                 highlightBubble(d.properties.CODE); // bubble function
+                 // d3.event.stopPropagation();
+                 zoomTo(path.centroid(d)[0], path.centroid(d)[1]);
+
+               })
+
+      // click to zoom function
+      function zoomTo(x, y){
+        g.transition()
+        .duration(300)
+        .attr("transform", "translate(" + (width/18 - x) + "," + (height/18 - y) + ")scale(" + 1.8 + ")");
+      }
+
+       function removeZipBlockColor (lastZip) {
+         let blockID = "#zip_" + lastZip;
+         gCrimetop.selectAll(blockID)
+            .style("fill", d => colorScaleMap(populationByZip[d.properties.CODE]))
+            .attr("opacity", 0.5);
+       }
+
+      // ** Checkbox Functions **
+      // Checkbox "crimes" function
+      d3.select("#checkboxCrime")
+        .on("click", function() {
+          gBusiness.selectAll("circle")
+                   .attr("opacity", 0);
+          gCrime.selectAll("circle")
+                .attr("opacity", 0);
+          gCrimeCon.selectAll("path.contours")
+                .attr("opacity", 0.5);
+        })
+
+      // Checkbox "businesses" function
+      d3.select("#checkboxBusiness")
+        .on("click", function() {
+          gBusiness.selectAll("circle")
+                   .attr("opacity", 0.4);
+          gCrime.selectAll("circle")
+                .attr("opacity", 0);
+          gCrimeCon.selectAll("path.contours")
+                .attr("opacity", 0);
+        })
+
+      // Checkbox "crimes and businesses" function
+      d3.select("#checkboxCrimeBusiness")
+        .on("click", function() {
+          gBusiness.selectAll("circle")
+                   .attr("opacity", 0.4);
+          gCrime.selectAll("circle")
+                .attr("opacity", 0.8);
+          gCrimeCon.selectAll("path.contours")
+                .attr("opacity", 0);
+        })
+
+      // toggle 1 function
+      d3.select("#switch")
+        .on("change", function() {
+          if (this.checked) {
+            g.selectAll("text")
+              .attr("opacity", 1)
+          } else {
+            g.selectAll("text")
+              .attr("opacity", 0)
+          }
+        })
+
+      // Show zip code on center of each polygon
+      g.selectAll("zipcodes")
+        .data(topojson.feature(topology, topology.objects.Zipcodes_Poly).features)
+        .enter()
+        .append("text")
+        .attr("x", function(d) { return path.centroid(d)[0]; })
+        .attr("y", function(d) { return path.centroid(d)[1]; })
+        .attr("dy", ".35em")
+        .attr("text-anchor", "middle")
+        .text(function(d) { return d.properties.CODE; })
+        .attr("fill", "#000000")
+        .style("font-size", "10px")
+        .style("font-weight", "bold")
+        .style("pointer-events", "none")
+        .attr("opacity", 0);
+
+      gCrimetop.selectAll("#zip_19104")
+         .style("fill", "#D3D0FC")
+         .attr("opacity", 0.8);
+
+      displayTop("19104");
+      highlightBubble("19104")
+
+      gCrimeCon.selectAll("path.contours")
+            .attr("opacity", 0)
+
+      // Map Tooltip
+      // Show zip code on center of each polygon
+      g.selectAll("zipcodes")
+        .data(topojson.feature(topology, topology.objects.Zipcodes_Poly).features)
+        .enter()
+        .append("text")
+        .attr("x", function(d) { return path.centroid(d)[0]; })
+        .attr("y", function(d) { return path.centroid(d)[1]; })
+        .attr("dy", ".35em")
+        .attr("text-anchor", "middle")
+        .text(function(d) { return d.properties.CODE; })
+        .attr("fill", "#000000")
+        .style("font-size", "10px")
+        .style("font-weight", "bold")
+        .style("pointer-events", "none")
+        .attr("opacity", 0);
+
+      let tooltipWidth = 170;
+      let tooltipHeight = 68;
+      var tooltipMap = svg.append("g")
+                      .attr("class","tooltipMap")
+                      .attr("visibility","hidden");
+      tooltipMap.append("rect")
+            .attr("fill", "black")
+            .attr("opacity", 0.9)
+            .attr("x", -tooltipWidth / 2.0)
+            .attr("y", 0)
+            .attr("width",tooltipWidth)
+            .attr("height",tooltipHeight)
+
+      // Create texts for the tooltip
+      let txt1 = tooltipMap.append("text")
+                      .attr("fill", "white")
+                      .attr("text-anchor","middle")
+                      .attr("alignment-baseline","hanging")
+                      .attr("x", 0)
+                      .attr("y", 2);
+      let txt2 = tooltipMap.append("text")
+                        .attr("fill", "white")
+                        .attr("text-anchor","middle")
+                        .attr("alignment-baseline","hanging")
+                        .attr("x", 0)
+                        .attr("y", 2+16);
+      let txt3 = tooltipMap.append("text")
+                        .attr("fill", "white")
+                        .attr("text-anchor","middle")
+                        .attr("alignment-baseline","hanging")
+                        .attr("x", 0)
+                        .attr("y", 2+16+16);
+      let txt4 = tooltipMap.append("text")
+                        .attr("fill", "white")
+                        .attr("text-anchor","middle")
+                        .attr("alignment-baseline","hanging")
+                        .attr("x", 0)
+                        .attr("y", 2+16+16+16);
+
+      // Hover function for zip codes
+      function mouseEnterZip (event, d) {
+        tooltipMap.style("visibility", "visible");
+        txt1.text("Zip Code: " + d.properties.CODE);
+        txt2.text("Business Count: " + businessByZip[d.properties.CODE]);
+        txt3.text("Crime Count: " + crimeByZip[d.properties.CODE]);
+        txt4.text("People / Sq. Mile: " + populationByZip[d.properties.CODE]);
+        d3.select(this).style("cursor", "pointer");
+
+        let xPos = event.pageX-10;
+        let yPos = event.pageY-230;
+
+        tooltipMap.attr("transform", `translate(${xPos},${yPos})`);
+        tooltipMap.transition()
+             .duration(200)
+             .style("opacity", 1);
+
+      // highlight selected region
+      d3.select(this)
+          .style("fill", "#D3D0FC")
+          .attr("opacity", 0.8);
+      }
+
+      function mouseLeaveZip (event, d) {
+        tooltipMap.style("visibility","hidden");
+        tooltipMap.transition()
+             .duration(200)
+             .style("opacity", 0);
+        // return to original color
+        if (d.properties.CODE != lastClickedZip) {
+          d3.select(this)
+             .style("fill", d => colorScaleMap(populationByZip[d.properties.CODE]))
+             .attr("opacity", 0.5);
+        }
+      }
+    }
+    requestData();
+  </script>
+</body>
+</html>

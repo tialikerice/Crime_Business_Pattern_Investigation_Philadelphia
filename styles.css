@@ -1,0 +1,96 @@
+html * {
+    font-family: 'Times New Roman', Times, serif;
+}
+
+path {
+    stroke: #fff;
+    stroke-width: .75px;
+    pointer-events: all;
+}
+
+/* toggle in label designing */
+.toggle {
+    position: relative ;
+    display: inline-block;
+    width: 40px;
+    height: 20px;
+    border-radius: 30px;
+    border: 1.5px solid gray;
+    top: 8px;
+    background-color: #cccccc;
+}
+
+/* After slide changes */
+.toggle:after {
+    content: '';
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background-color: white;
+    border: 1.5px solid gray;
+    top: -1.5px;
+    left: -1px;
+    transition:  all 0.5s;
+}
+
+/* Toggle text */
+p {
+    font-weight: bold;
+}
+
+/* Checkbox checked effect */
+.checkbox:checked + .toggle::after {
+    left : 18px;
+}
+
+/* Checkbox checked toggle label bg color */
+.checkbox:checked + .toggle {
+    background-color: #4BB543;
+}
+
+/* Checkbox vanished */
+.checkbox {
+    display : none;
+}
+
+#contour {
+    stroke: none;
+}
+
+.tooltip{
+  position: absolute;
+}
+
+.bubbles {
+    stroke-width: 2px;
+    stroke: white;
+}
+
+.bubbles_lowopacity {
+    opacity: 0.2;
+}
+
+.bubbles_highlighted {
+    stroke-width: 2px;
+    stroke: black;
+    opacity: 1;
+}
+
+
+.bubbles:hover {
+    stroke: black;
+}
+
+text {
+    font-size: 14px;
+    color: black;
+}
+
+#axis path {
+    stroke: black;
+}
+
+#legend {
+    font-size: 1em;
+}
